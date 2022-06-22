@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: example project description
+
+Parameters:
+  DeployEnvironment:
+    Description: Deploy environment type.
+    Default: dev
+    Type: String
+    AllowedValues: [dev, prod]
+    ConstraintDescription: must specify dev or prod.
+  MysqlServer:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: 'MysqlServer'
+    Description: From SSM, Mysql server url (localhost:3306)
+
+
+Mappings:
+  Environments:
+    dev:
+      SQSLambdaQueueARN: arn:aws:sqs:us-west-2:XXXXXXXXXXXX:example-queue
+    prod:
+      SQSLambdaQueueARN: arn:aws:sqs:us-west-2:XXXXXXXXXXXX:example-queue
+
+
+Globals: # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-template-anatomy-globals.html
+    Function:
+      Environment:
+        Variables:
+          # Powertools env vars: https://awslabs.github.io/aws-lambda-powertools-python/#environment-variables
+          DEPLOY_ENV: !Ref DeployEnvironment
+          LOG_LEVEL: INFO
+          POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
+          POWERTOOLS_LOGGER_LOG_EVENT: true
+          POWERTOOLS_METRICS_NAMESPACE: example project
+          POWERTOOLS_SERVICE_NAME: example-project
+          MYSQL_SERVER: !Ref MysqlServer
+          MYSQL_USER: "user"
+          MYSQL_PASSWORD: "password"
+      Timeout: 29
+      MemorySize: 128
+      Runtime: python3.9
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+      Tracing: Active # https://docs.aws.amazon.com/lambda/latest/dg/lambda-x-ray.html
+      # Embed Lambda Powertools as a shared Layer
+      # See: https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
+      Layers: #
+          - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:17
+      Tags:
+        Name: example project
+        Environment: !Ref DeployEnvironment
+        BusinessOwner: example@gmail.com
+
+Resources:
+  lambdaWithEventBridge:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "lambdaWithEventBridge"
+      CodeUri: runtime/
+      Handler: src.eventbridge.app.lambda_handler
+      Timeout: 29
+      MemorySize: 128
+      Layers:
+        - !Ref lambdaDependenciesLayer
+      Events:
+        EventBridgeSchedule:
+          Type: Schedule
+          Properties:
+            Name: "lambdaWithEventBridge"
+            Description: "lambdaWithEventBridge schedule expression"
+            Enabled: true
+            Schedule: cron(0/30 * * * ? *)  # https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-create-rule-schedule.html
+
+  lambdaWithSQS:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "lambdaWithSQS"
+      CodeUri: runtime/
+      Handler: src.sqs.app.lambda_handler
+      Timeout: 29
+      MemorySize: 128
+      Layers:
+        - !Ref lambdaDependenciesLayer
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !FindInMap [Environments, !Ref DeployEnvironment, SQSLambdaQueueARN]
+            BatchSize: 100
+            MaximumBatchingWindowInSeconds: 30  # windows for batch size greater than 10 to work properly in seconds
+
+  lambdaDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+        LayerName: "lambdaDependenciesLayer"
+        Description: Includes all requirements needed for running in Lambda
+        ContentUri: dependencies/  # Created at deployment time
+        CompatibleRuntimes:
+          - python3.9
+        RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.9

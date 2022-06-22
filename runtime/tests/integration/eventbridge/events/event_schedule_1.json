@@ -1,0 +1,13 @@
+{
+    "version": "0",
+    "id": "dfc9651f-da20-b752-4482-0fffe1b7cec8",
+    "detail-type": "Scheduled Event",
+    "source": "aws.events",
+    "account": "123",
+    "time": "2022-05-16T12:11:01Z",
+    "region": "us-west-2",
+    "resources": [
+        "arn:aws:events:us-west-2:123:rule/test-event"
+    ],
+    "detail": {}
+}
